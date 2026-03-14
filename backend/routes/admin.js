@@ -1,4 +1,4 @@
-
+// admin.js
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcrypt');
@@ -105,16 +105,16 @@ router.get('/profile', verifyToken, verifyAdmin, async (req, res) => {
 router.get('/stats', verifyToken, verifyAdmin, async (req, res) => {
     try {
        
-        const totalReports = await query('SELECT COUNT(*) as count FROM incident_reports');
+        const totalReports = await query('SELECT COUNT(*) as count FROM HazardEye_reports');
         
        
         const statusCounts = await query(
-            'SELECT status, COUNT(*) as count FROM incident_reports GROUP BY status'
+            'SELECT status, COUNT(*) as count FROM HazardEye_reports GROUP BY status'
         );
         reports
        
         const recentReports = await query(
-            'SELECT COUNT(*) as count FROM incident_reports WHERE reported_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)'
+            'SELECT COUNT(*) as count FROM HazardEye_reports WHERE reported_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)'
         );
         
         const flaggedUsers = await query(

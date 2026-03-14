@@ -1,4 +1,4 @@
-
+// incident.js
 const express = require('express');
 const router = express.Router();
 const { query } = require('../config/database');
@@ -19,7 +19,7 @@ router.post('/', async (req, res) => {
         }
         
         const result = await query(
-            `INSERT INTO incident_reports 
+            `INSERT INTO HazardEye_reports 
             (title, description, latitude, longitude, location_address, category, priority, user_id, ip_address) 
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [title, description, latitude, longitude, locationAddress || null, category || 'General', 
@@ -47,7 +47,7 @@ router.get('/', async (req, res) => {
         
         let sql = `
             SELECT ir.*, u.username, u.is_flagged as user_flagged
-            FROM incident_reports ir
+            FROM HazardEye_reports ir
             LEFT JOIN users u ON ir.user_id = u.id
             WHERE 1=1
         `;
@@ -94,7 +94,7 @@ router.get('/:id', async (req, res) => {
         
         const incidents = await query(
             `SELECT ir.*, u.username, u.email as user_email, u.is_flagged as user_flagged
-            FROM incident_reports ir
+            FROM HazardEye_reports ir
             LEFT JOIN users u ON ir.user_id = u.id
             WHERE ir.id = ?`,
             [id]
@@ -137,7 +137,7 @@ router.put('/:id', verifyToken, verifyAdmin, async (req, res) => {
         const { id } = req.params;
         const { status, priority, adminNotes } = req.body;
         
-        const currentIncident = await query('SELECT * FROM incident_reports WHERE id = ?', [id]);
+        const currentIncident = await query('SELECT * FROM HazardEye_reports WHERE id = ?', [id]);
         
         if (currentIncident.length === 0) {
             return res.status(404).json({
@@ -208,7 +208,7 @@ router.put('/:id', verifyToken, verifyAdmin, async (req, res) => {
         
         params.push(id);
         await query(
-            `UPDATE incident_reports SET ${updates.join(', ')} WHERE id = ?`,
+            `UPDATE HazardEye_reports SET ${updates.join(', ')} WHERE id = ?`,
             params
         );
         
@@ -230,7 +230,7 @@ router.delete('/:id', verifyToken, verifyAdmin, async (req, res) => {
     try {
         const { id } = req.params;
         
-        const result = await query('DELETE FROM incident_reports WHERE id = ?', [id]);
+        const result = await query('DELETE FROM HazardEye_reports WHERE id = ?', [id]);
         
         if (result.affectedRows === 0) {
             return res.status(404).json({
@@ -257,7 +257,7 @@ router.get('/map/markers', async (req, res) => {
     try {
         const incidents = await query(
             `SELECT id, title, latitude, longitude, status, priority, category, reported_at
-            FROM incident_reports
+            FROM HazardEye_reports
             ORDER BY reported_at DESC`
         );
         

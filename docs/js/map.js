@@ -1,4 +1,4 @@
-
+// map.js
 class IncidentMap {
     constructor(elementId, options = {}) {
         this.elementId = elementId;

@@ -1,194 +1,106 @@
+// admin.js
+cat > /mnt/user-data/outputs/routes/admin.js << 'EOF'
+const express = require('express');
+const router = express.Router();
+const bcrypt = require('bcrypt');
+const { query } = require('../config/database');
+const { generateToken, verifyToken, verifyAdmin } = require('../middleware/auth');
 
-async function loadAdminStats() {
-    if (!Auth.isAdmin()) return;
-    
+router.post('/login', async (req, res) => {
     try {
-        const response = await API.getAdminStats();
-        const stats = response.stats;
-        
-        document.getElementById('totalReports').textContent = stats.totalReports || 0;
-        document.getElementById('flaggedUsers').textContent = stats.flaggedUsers || 0;
-        
-        let pending = 0;
-        let resolved = 0;
-        
-        if (stats.statusBreakdown) {
-            stats.statusBreakdown.forEach(item => {
-                if (item.status === 'Pending') pending = item.count;
-                if (item.status === 'Resolved') resolved = item.count;
-            });
+        const { username, password } = req.body;
+        if (!username || !password) {
+            return res.status(400).json({ success: false, message: 'Username and password are required' });
         }
-        
-        document.getElementById('pendingReports').textContent = pending;
-        document.getElementById('resolvedReports').textContent = resolved;
-    } catch (error) {
-        console.error('Error loading admin stats:', error);
-    }
-}
-
-
-async function loadAdminTable() {
-    if (!Auth.isAdmin()) return;
-    
-    try {
-        const response = await API.getIncidents({ limit: 100 });
-        const tbody = document.getElementById('adminTableBody');
-        
-        if (!tbody) return;
-        
-        if (!response.incidents || response.incidents.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px;">No incidents to manage</td></tr>';
-            return;
+        const admins = await query(
+            'SELECT id, username, email, password_hash, full_name, role FROM admins WHERE username = ? OR email = ?',
+            [username, username]
+        );
+        if (admins.length === 0) {
+            return res.status(401).json({ success: false, message: 'Invalid admin credentials' });
         }
-        
-        tbody.innerHTML = response.incidents.map(incident => `
-            <tr>
-                <td>${incident.id}</td>
-                <td>
-                    ${incident.title}
-                    ${incident.user_flagged ? '<br><small style="color: #ef4444;">⚠ Flagged User</small>' : ''}
-                </td>
-                <td>${incident.username || 'Anonymous'}</td>
-                <td>
-                    <select class="status-select" data-id="${incident.id}" data-current="${incident.status}">
-                        <option value="Pending" ${incident.status === 'Pending' ? 'selected' : ''}>Pending</option>
-                        <option value="Verified" ${incident.status === 'Verified' ? 'selected' : ''}>Verified</option>
-                        <option value="In Progress" ${incident.status === 'In Progress' ? 'selected' : ''}>In Progress</option>
-                        <option value="Resolved" ${incident.status === 'Resolved' ? 'selected' : ''}>Resolved</option>
-                        <option value="False Report" ${incident.status === 'False Report' ? 'selected' : ''}>False Report</option>
-                    </select>
-                </td>
-                <td>
-                    <select class="priority-select" data-id="${incident.id}" data-current="${incident.priority}">
-                        <option value="Low" ${incident.priority === 'Low' ? 'selected' : ''}>Low</option>
-                        <option value="Medium" ${incident.priority === 'Medium' ? 'selected' : ''}>Medium</option>
-                        <option value="High" ${incident.priority === 'High' ? 'selected' : ''}>High</option>
-                        <option value="Critical" ${incident.priority === 'Critical' ? 'selected' : ''}>Critical</option>
-                    </select>
-                </td>
-                <td>${new Date(incident.reported_at).toLocaleDateString()}</td>
-                <td>
-                    <div class="action-buttons">
-                        <button class="btn-action btn-view" onclick="viewIncidentDetails(${incident.id})">View</button>
-                        <button class="btn-action btn-edit" onclick="editIncidentNotes(${incident.id})">Notes</button>
-                        <button class="btn-action btn-delete" onclick="deleteIncident(${incident.id})">Delete</button>
-                    </div>
-                </td>
-            </tr>
-        `).join('');
-        
-        tbody.querySelectorAll('.status-select').forEach(select => {
-            select.addEventListener('change', async (e) => {
-                const incidentId = e.target.dataset.id;
-                const newStatus = e.target.value;
-                const oldStatus = e.target.dataset.current;
-                
-                if (newStatus === oldStatus) return;
-                
-                try {
-                    await API.updateIncident(incidentId, { status: newStatus });
-                    showNotification('Status updated successfully', 'success');
-                    e.target.dataset.current = newStatus;
-                    
-                    loadAdminStats();
-                    if (window.mainMap) {
-                        window.mainMap.loadIncidents();
-                    }
-                } catch (error) {
-                    showNotification('Failed to update status', 'error');
-                    e.target.value = oldStatus; 
-                }
-            });
-        });
-        
-        tbody.querySelectorAll('.priority-select').forEach(select => {
-            select.addEventListener('change', async (e) => {
-                const incidentId = e.target.dataset.id;
-                const newPriority = e.target.value;
-                const oldPriority = e.target.dataset.current;
-                
-                if (newPriority === oldPriority) return;
-                
-                try {
-                    await API.updateIncident(incidentId, { priority: newPriority });
-                    showNotification('Priority updated successfully', 'success');
-                    e.target.dataset.current = newPriority;
-                    
-                    
-                    if (window.mainMap) {
-                        window.mainMap.loadIncidents();
-                    }
-                } catch (error) {
-                    showNotification('Failed to update priority', 'error');
-                    e.target.value = oldPriority; 
-                }
-            });
+        const admin = admins[0];
+        const validPassword = await bcrypt.compare(password, admin.password_hash);
+        if (!validPassword) {
+            return res.status(401).json({ success: false, message: 'Invalid admin credentials' });
+        }
+        await query('UPDATE admins SET last_login = NOW() WHERE id = ?', [admin.id]);
+        const token = generateToken({ id: admin.id, username: admin.username, isAdmin: true, role: admin.role });
+        res.json({
+            success: true, message: 'Admin login successful', token,
+            admin: { id: admin.id, username: admin.username, email: admin.email, fullName: admin.full_name, role: admin.role }
         });
     } catch (error) {
-        console.error('Error loading admin table:', error);
-        showNotification('Failed to load incidents', 'error');
+        console.error('Admin login error:', error);
+        res.status(500).json({ success: false, message: 'Server error during admin login' });
     }
-}
+});
 
-
-window.editIncidentNotes = async function(incidentId) {
+router.get('/profile', verifyToken, verifyAdmin, async (req, res) => {
     try {
-        const response = await API.getIncident(incidentId);
-        const incident = response.incident;
-        
-        const notes = prompt('Enter admin notes for this incident:', incident.admin_notes || '');
-        
-        if (notes !== null) {
-            await API.updateIncident(incidentId, { adminNotes: notes });
-            showNotification('Notes updated successfully', 'success');
-            loadAdminTable();
-        }
+        const admins = await query(
+            'SELECT id, username, email, full_name, role, created_at, last_login FROM admins WHERE id = ?',
+            [req.user.id]
+        );
+        if (admins.length === 0) return res.status(404).json({ success: false, message: 'Admin not found' });
+        res.json({ success: true, admin: admins[0] });
     } catch (error) {
-        showNotification('Failed to update notes', 'error');
+        res.status(500).json({ success: false, message: 'Server error fetching admin profile' });
     }
-};
+});
 
-
-window.deleteIncident = async function(incidentId) {
-    if (!confirm('Are you sure you want to delete this incident? This action cannot be undone.')) {
-        return;
-    }
-    
+router.get('/stats', verifyToken, verifyAdmin, async (req, res) => {
     try {
-        await API.deleteIncident(incidentId);
-        showNotification('Incident deleted successfully', 'success');
-        loadAdminTable();
-        loadAdminStats();
-        
-        if (window.mainMap) {
-            window.mainMap.loadIncidents();
-        }
+        const totalReports = await query('SELECT COUNT(*) as count FROM HazardEye_reports');
+        const statusCounts = await query('SELECT status, COUNT(*) as count FROM HazardEye_reports GROUP BY status');
+        const recentReports = await query('SELECT COUNT(*) as count FROM HazardEye_reports WHERE reported_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)');
+        const flaggedUsers = await query('SELECT COUNT(*) as count FROM users WHERE is_flagged = true');
+        res.json({
+            success: true,
+            stats: {
+                totalReports: totalReports[0].count,
+                recentReports: recentReports[0].count,
+                flaggedUsers: flaggedUsers[0].count,
+                statusBreakdown: statusCounts
+            }
+        });
     } catch (error) {
-        showNotification('Failed to delete incident', 'error');
+        res.status(500).json({ success: false, message: 'Server error fetching statistics' });
     }
-};
+});
 
-const adminStyle = document.createElement('style');
-adminStyle.textContent = `
-    .status-select,
-    .priority-select {
-        padding: 4px 8px;
-        border: 1px solid var(--border);
-        border-radius: 4px;
-        background: var(--bg-secondary);
-        color: var(--text-primary);
-        font-size: 0.9rem;
-        cursor: pointer;
-        font-family: var(--font-mono);
+router.get('/users', verifyToken, verifyAdmin, async (req, res) => {
+    try {
+        const users = await query(
+            'SELECT id, username, email, ip_address, false_report_count, is_flagged, created_at, last_login FROM users ORDER BY created_at DESC'
+        );
+        res.json({ success: true, users });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Server error fetching users' });
     }
-    
-    .status-select:focus,
-    .priority-select:focus {
-        outline: none;
-        border-color: var(--primary);
-    }
-`;
-document.head.appendChild(adminStyle);
+});
 
-window.loadAdminStats = loadAdminStats;
-window.loadAdminTable = loadAdminTable;
+router.patch('/users/:id/flag', verifyToken, verifyAdmin, async (req, res) => {
+    try {
+        const { is_flagged } = req.body;
+        await query('UPDATE users SET is_flagged = ? WHERE id = ?', [is_flagged ? 1 : 0, req.params.id]);
+        res.json({ success: true, message: `User ${is_flagged ? 'flagged' : 'unflagged'} successfully` });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Failed to update user' });
+    }
+});
+
+router.get('/actions', verifyToken, verifyAdmin, async (req, res) => {
+    try {
+        const actions = await query(`
+            SELECT aa.*, a.username as admin_username, ir.title as incident_title
+            FROM admin_actions aa
+            LEFT JOIN admins a ON aa.admin_id = a.id
+            LEFT JOIN HazardEye_reports ir ON aa.incident_id = ir.id
+            ORDER BY aa.action_timestamp DESC
+        `);
+        res.json({ success: true, actions });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Failed to fetch action log' });
+    }
+});

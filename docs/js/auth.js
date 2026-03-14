@@ -1,3 +1,4 @@
+// auth.js
 class Auth {
     static isLoggedIn() {
         return !!localStorage.getItem(CONFIG.STORAGE_KEYS.TOKEN);
